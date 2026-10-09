@@ -53,41 +53,70 @@ def _read_result_page(registration):
             page = browser.new_page()
             page.set_default_timeout(15_000)
 
-            page.goto(MIB_URL, wait_until="domcontentloaded")
-            card = page.get_by_test_id("personal_check_card")
-            card.wait_for(state="visible")
-            card.click()
-            page.get_by_test_id("continueBtn").click()
+            # Note every request that MIB answers with an error status.
+            failed = []
 
-            page.get_by_role("heading", name="Use & Terms").wait_for(
-                state="visible"
-            )
-            checkbox = page.get_by_role("checkbox")
-            if checkbox.get_attribute("aria-checked") != "true":
-                checkbox.click()
-            page.get_by_role("button", name="Agree and continue").click()
+            def note_failure(response):
+                if response.status >= 400:
+                    failed.append(f"{response.status} {response.url}")
 
-            vrm = page.get_by_test_id("vrm_searchtext")
-            vrm.wait_for(state="visible")
-            vrm.fill(registration)
-            vrm.press("Tab")
+            page.on("response", note_failure)
 
-            banner = page.get_by_test_id("userCookiesBanner")
-            if banner.count() and banner.is_visible():
-                reject = page.get_by_role(
-                    "button", name="Reject analytics cookies"
-                )
-                if reject.count() and reject.is_visible():
-                    reject.click()
-
-            page.wait_for_function(_SUBMIT_ENABLED_JS)
-            page.get_by_test_id("continueBtn").click()
-
-            panel = page.get_by_test_id("VRNResultPage")
-            panel.wait_for(state="visible", timeout=25_000)
-            return panel.inner_text()
+            try:
+                return _click_through(page, registration)
+            except Exception:
+                _log_what_mib_showed(page, failed)
+                raise
         finally:
             browser.close()
+
+
+def _click_through(page, registration):
+    page.goto(MIB_URL, wait_until="domcontentloaded")
+    card = page.get_by_test_id("personal_check_card")
+    card.wait_for(state="visible")
+    card.click()
+    page.get_by_test_id("continueBtn").click()
+
+    page.get_by_role("heading", name="Use & Terms").wait_for(state="visible")
+    checkbox = page.get_by_role("checkbox")
+    if checkbox.get_attribute("aria-checked") != "true":
+        checkbox.click()
+    page.get_by_role("button", name="Agree and continue").click()
+
+    vrm = page.get_by_test_id("vrm_searchtext")
+    vrm.wait_for(state="visible")
+    vrm.fill(registration)
+    vrm.press("Tab")
+
+    banner = page.get_by_test_id("userCookiesBanner")
+    if banner.count() and banner.is_visible():
+        reject = page.get_by_role("button", name="Reject analytics cookies")
+        if reject.count() and reject.is_visible():
+            reject.click()
+
+    page.wait_for_function(_SUBMIT_ENABLED_JS)
+    page.get_by_test_id("continueBtn").click()
+
+    panel = page.get_by_test_id("VRNResultPage")
+    panel.wait_for(state="visible", timeout=25_000)
+    return panel.inner_text()
+
+
+def _log_what_mib_showed(page, failed):
+    """A lookup failed: record what the page was displaying at the time."""
+    try:
+        text = " ".join(page.locator("body").inner_text(timeout=3_000).split())
+        logger.warning(
+            "MIB page at failure: url=%s | title=%s | failed requests=%s | "
+            "text=%s",
+            page.url,
+            page.title(),
+            failed[-10:],
+            text[:1500],
+        )
+    except Exception:
+        logger.warning("MIB page at failure could not be read.")
 
 
 def _parse(text, registration):

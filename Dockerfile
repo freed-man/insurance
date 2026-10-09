@@ -25,4 +25,4 @@ USER pwuser
 
 # Xvfb runs in the background and exec makes gunicorn PID 1, so it still
 # receives SIGTERM and shuts down cleanly. xvfb-run would not pass it on.
-CMD ["sh", "-c", "rm -f /tmp/.X99-lock; Xvfb :99 -screen 0 1280x800x24 -nolisten tcp & exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --worker-class gthread --workers 1 --threads 8 --graceful-timeout 30"]
+CMD ["sh", "-c", "rm -f /tmp/.X99-lock; Xvfb :99 -screen 0 1280x800x24 -nolisten tcp -noreset & exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --worker-class gthread --workers 1 --threads 8 --graceful-timeout 30"]
