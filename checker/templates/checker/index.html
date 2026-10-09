@@ -124,11 +124,13 @@
         <div class="brand">Vehicle checker</div>
         <h1>Check vehicle insurance</h1>
         <p class="intro">
-            Enter a UK vehicle registration to check its insurance status.
+            Enter a UK vehicle registration to check what the
+            MIB Navigate service currently shows.
         </p>
 
-        <form id="check-form">
+        <form id="check-form" method="post">
             {% csrf_token %}
+
             <label for="registration">Vehicle registration</label>
             <input
                 id="registration"
@@ -140,16 +142,23 @@
                 autocapitalize="characters"
                 required
             >
+
             <button id="submit-button" type="submit">
                 Check insurance
             </button>
         </form>
 
-        <section id="result" role="status" aria-live="polite"></section>
+        <section
+            id="result"
+            role="status"
+            aria-live="polite"
+        ></section>
 
         <p class="disclaimer">
-            The live insurance lookup has not yet been connected.
-            This page does not currently confirm whether a vehicle is insured.
+            Results reflect the information currently shown by MIB
+            Navigate and are not proof of insurance. Updates may take
+            seven days or longer. If a result cannot be verified,
+            check with your insurer.
         </p>
     </main>
 
@@ -161,8 +170,8 @@
 
         function showResult(status, message, registration = "") {
             const styles = {
-                insured: ["✓", "Insurance confirmed"],
-                uninsured: ["✕", "Insurance not confirmed"],
+                insured: ["✓", "Showing as insured"],
+                uninsured: ["✕", "Not showing as insured"],
                 unknown: ["?", "Unable to verify"],
                 invalid: ["!", "Check your entry"]
             };
@@ -196,32 +205,47 @@
             result.textContent = "";
 
             try {
+                const csrfInput = form.querySelector(
+                    'input[name="csrfmiddlewaretoken"]'
+                );
+
+                if (!csrfInput || !csrfInput.value) {
+                    throw new Error("CSRF token is missing.");
+                }
+
                 const response = await fetch("/api/check/", {
                     method: "POST",
                     body: new FormData(form),
+                    credentials: "same-origin",
                     headers: {
-                        "X-Requested-With": "XMLHttpRequest"
+                        "X-Requested-With": "XMLHttpRequest",
+                        "X-CSRFToken": csrfInput.value
                     }
                 });
 
                 const data = await response.json();
 
-                if (!response.ok) {
+                if (response.status === 403) {
                     showResult(
-                        "invalid",
-                        data.message || "Please check your entry."
+                        "unknown",
+                        "The request was rejected by the site's security protection. Refresh the page and try again."
+                    );
+                } else if (!response.ok) {
+                    showResult(
+                        data.status === "invalid" ? "invalid" : "unknown",
+                        data.message || "The check could not be completed."
                     );
                 } else {
                     showResult(
                         data.status,
-                        data.message,
-                        data.registration
+                        data.message || "No additional details were provided.",
+                        data.registration || ""
                     );
                 }
             } catch (error) {
                 showResult(
                     "unknown",
-                    "The check could not be completed. Please try again."
+                    "The check could not be completed. Refresh the page and try again."
                 );
             } finally {
                 button.disabled = false;
