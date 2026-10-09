@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 MIB_URL = "https://enquiry.navigate.mib.org.uk/checkyourvehicle"
 
 PAGE_TIMEOUT_MS = 15_000
-RESULT_TIMEOUT_MS = 60_000
+RESULT_TIMEOUT_MS = 25_000
 
 # Set MIB_HEADLESS=false locally to see the browser.
 # Defaults to headless mode for deployment.
@@ -96,15 +96,14 @@ def check_mib(registration):
                             "Title=%s URL=%s Page text=%s",
                             page.title(),
                             page.url,
-                            body_text[:2500],
+                            body_text[:2000],
                         )
 
                         return {
                             "status": "unknown",
                             "message": (
-                                "The MIB page did not display the "
-                                "expected personal check option. "
-                                "Please try again later."
+                                "MIB did not display the personal "
+                                "check page. Please try again later."
                             ),
                         }
 
@@ -169,10 +168,50 @@ def check_mib(registration):
                         "VRNResultPage"
                     )
 
-                    result_panel.wait_for(
-                        state="visible",
-                        timeout=RESULT_TIMEOUT_MS,
-                    )
+                    try:
+                        result_panel.wait_for(
+                            state="visible",
+                            timeout=RESULT_TIMEOUT_MS,
+                        )
+                    except PlaywrightTimeoutError:
+                        # Capture what MIB actually showed, so the
+                        # next failure can be diagnosed from the logs.
+                        try:
+                            page_title = page.title()
+                        except Exception:
+                            page_title = "(unavailable)"
+
+                        try:
+                            page_url = page.url
+                        except Exception:
+                            page_url = "(unavailable)"
+
+                        try:
+                            body_text = page.locator(
+                                "body"
+                            ).inner_text(timeout=3000)
+                        except Exception:
+                            body_text = "(page text unavailable)"
+
+                        logger.warning(
+                            "MIB result page did not appear within "
+                            "%s ms. Title=%s URL=%s Page text=%s",
+                            RESULT_TIMEOUT_MS,
+                            page_title,
+                            page_url,
+                            body_text[:2500],
+                        )
+
+                        return {
+                            "status": "unknown",
+                            "registration": registration,
+                            "message": (
+                                "MIB did not return a result in "
+                                "time. No insurance status could "
+                                "be verified. Please try again "
+                                "later or check directly with MIB."
+                            ),
+                        }
 
                     result_text = result_panel.inner_text()
 
@@ -219,8 +258,8 @@ def check_mib(registration):
                             ),
                         }
 
-                    # Check NOT INSURED first. This prevents the
-                    # word INSURED inside NOT INSURED being matched.
+                    # Check NOT INSURED first so it cannot be
+                    # mistaken for the insured result.
                     not_insured_match = re.search(
                         r"This vehicle is showing as\s+"
                         r"NOT\s+INSURED\s+"
@@ -313,7 +352,8 @@ def check_mib(registration):
         return {
             "status": "unknown",
             "message": (
-                "The MIB check timed out. Please try again later."
+                "The MIB check timed out. No insurance status "
+                "could be verified. Please try again later."
             ),
         }
 
