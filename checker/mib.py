@@ -23,6 +23,19 @@ _SUBMIT_ENABLED_JS = """() => {
     return button && !button.disabled;
 }"""
 
+# After submitting, MIB shows either the result or its search-limit message.
+_OUTCOME_JS = r"""() => {
+    const panel = document.querySelector('[data-testid="VRNResultPage"]');
+    if (panel && panel.getClientRects().length) return "result";
+    const text = document.body.innerText.replace(/\s+/g, " ");
+    if (text.includes("reached your limit of searches")) return "limit";
+    return false;
+}"""
+
+
+class SearchLimitReached(Exception):
+    """MIB refused the search because its limit has been reached."""
+
 
 def clean_registration(raw):
     """'ab12 cde' -> 'AB12CDE'; None if it can't be a UK registration."""
@@ -33,11 +46,14 @@ def clean_registration(raw):
 
 
 def lookup(registration):
-    """Return {"status": "insured" | "uninsured" | "unknown"}, plus the
-    vehicle when MIB shows one."""
+    """Return {"status": "insured" | "uninsured" | "limit" | "unknown"}, plus
+    the vehicle when MIB shows one."""
     try:
         with _one_at_a_time:
             text = _read_result_page(registration)
+    except SearchLimitReached:
+        logger.warning("MIB search limit reached.")
+        return {"status": "limit"}
     except Exception:
         logger.exception("MIB lookup failed.")
         return {"status": "unknown"}
@@ -64,6 +80,8 @@ def _read_result_page(registration):
 
             try:
                 return _click_through(page, registration)
+            except SearchLimitReached:
+                raise
             except Exception:
                 _log_what_mib_showed(page, failed)
                 raise
@@ -98,9 +116,12 @@ def _click_through(page, registration):
     page.wait_for_function(_SUBMIT_ENABLED_JS)
     page.get_by_test_id("continueBtn").click()
 
-    panel = page.get_by_test_id("VRNResultPage")
-    panel.wait_for(state="visible", timeout=25_000)
-    return panel.inner_text()
+    outcome = page.wait_for_function(
+        _OUTCOME_JS, timeout=25_000, polling=250
+    ).json_value()
+    if outcome == "limit":
+        raise SearchLimitReached
+    return page.get_by_test_id("VRNResultPage").inner_text()
 
 
 def _log_what_mib_showed(page, failed):
